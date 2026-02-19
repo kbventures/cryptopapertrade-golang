@@ -68,10 +68,23 @@ Add entries here when a choice has real trade-offs worth remembering.
 **Chosen:** Asynq (Redis-backed)
 **Rejected:** Fire-and-forget goroutines
 **Why:**
-- AI critique jobs must survive server restarts — goroutines do not
-- Asynq provides retry with backoff, deduplication by trade ID, and a built-in dashboard
-- Decouples trade-close latency from Claude API latency (which can be 3–10s)
-**Revisit if:** Redis adds unacceptable operational overhead for the scale we're at
+
+**Durability — the core reason**
+A goroutine lives in memory. If the server crashes, restarts, or is redeployed mid-analysis, the job is silently gone. The user never gets their AI critique and nothing in the system knows it was lost. Asynq persists the job to Redis before the worker picks it up — a restart just means the job gets picked up after the server comes back.
+
+**Retries**
+Claude API calls fail. Rate limits, timeouts, transient errors. With a goroutine you either write your own retry logic (boilerplate, easy to get wrong) or the job is lost on the first failure. Asynq handles exponential backoff retry out of the box, configurable per task type.
+
+**Deduplication**
+If a trade close is somehow triggered twice (race condition, duplicate webhook), two goroutines would fire two Claude API calls and write two analyses. Asynq lets you key jobs by trade ID so the second enqueue is a no-op.
+
+**Observability**
+Goroutines are invisible — you have no idea how many are running, how many failed, or how long they're taking. Asynq ships with a web dashboard that shows queue depth, processing rate, failed jobs, and retry history. Critical when debugging why a user didn't receive their analysis.
+
+**Backpressure**
+If 100 trades close simultaneously, 100 goroutines fire Claude API calls at once. Asynq lets you set a concurrency limit on the worker so you control how many Claude calls run in parallel, avoiding rate limit hammering.
+
+**Revisit if:** Redis adds unacceptable operational overhead for the scale we're at, or if we move to a managed job queue (e.g. Inngest, Temporal) that offers the same guarantees with less infra to maintain.
 
 ---
 
