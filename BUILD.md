@@ -4,7 +4,7 @@
 
 | Layer | Technology | Host |
 |---|---|---|
-| Backend | Go + Fiber | Fly.io |
+| Backend | Go + Gin | Fly.io |
 | Mobile | React Native + Expo | EAS / App Store |
 | Database | PostgreSQL | Fly.io Postgres |
 | Queue | Asynq + Redis | Upstash |
@@ -20,12 +20,13 @@
 ## Monorepo Layout
 
 ```
-crypto-paper-trader/
+cryptopapertrade-api/
 ├── apps/
-│   ├── server/          # Go backend (Fiber)
-│   └── mobile/          # React Native (Expo)
+│   ├── server/          # Go backend (Gin)
+│   ├── mobile/          # React Native (Expo)
+│   └── desktop/         # Future: Tauri (placeholder — do not build yet)
 ├── packages/
-│   └── types/           # Shared TypeScript types (generated from Go)
+│   └── types/           # Shared TypeScript types (kept in sync with Go API shapes)
 ├── .github/
 │   └── workflows/
 ├── pnpm-workspace.yaml
@@ -62,6 +63,7 @@ crypto-paper-trader/
 - [ ] Init repo with `pnpm-workspace.yaml`
 - [ ] Create `apps/server` with Go module (`go mod init`)
 - [ ] Create `apps/mobile` with `npx create-expo-app`
+- [ ] Create `apps/desktop/` as an empty placeholder directory with a `README.md` noting "Tauri app — not started yet"
 - [ ] Create `packages/types` with empty `package.json`
 - [ ] Add root `.gitignore` (Go, Node, .env)
 - [ ] Add `.env.example` with all required keys (no values)
@@ -87,7 +89,7 @@ CLERK_WEBHOOK_SECRET=
 **Tasks:**
 - [ ] Choose migration tool: `golang-migrate` (file-based, no ORM)
 - [ ] Write initial migration: `users`, `trades`, `ai_critiques`, `subscriptions` tables (see schema below)
-- [ ] Go packages: `gofiber/fiber/v2`, `jackc/pgx/v5`, `joho/godotenv`
+- [ ] Go packages: `gin-gonic/gin`, `jackc/pgx/v5`, `joho/godotenv`
 - [ ] `internal/database/` — connection pool, ping on startup
 - [ ] `internal/models/` — Go structs matching DB tables
 - [ ] `GET /health` endpoint
@@ -115,6 +117,8 @@ CREATE TABLE trades (
     side         VARCHAR(10) NOT NULL,       -- 'long' | 'short'
     entry_price  NUMERIC(20,8) NOT NULL,
     exit_price   NUMERIC(20,8),
+    stop_loss    NUMERIC(20,8),              -- optional; engine auto-closes when price hits
+    take_profit  NUMERIC(20,8),              -- optional; engine auto-closes when price hits
     quantity     NUMERIC(20,8) NOT NULL,
     status       VARCHAR(20) DEFAULT 'open', -- 'open' | 'closed'
     pnl          NUMERIC(20,8),
@@ -256,7 +260,7 @@ GET    /api/v1/stats               win rate, avg PnL, total trades, best/worst t
 ```
 
 **Tasks:**
-- [ ] `internal/trades/handler.go` — Fiber route handlers
+- [ ] `internal/trades/handler.go` — Gin route handlers
 - [ ] `internal/trades/repository.go` — all DB queries (no raw SQL in handlers)
 - [ ] Input validation: symbol format, quantity > 0, side in (long/short)
 - [ ] Ownership check middleware: user can only access their own trades
@@ -464,7 +468,7 @@ STRIPE_PRO_PRICE_ID=price_...
 - [ ] Component: form validation on NewTradeScreen
 
 **Hardening (from CRITIQUE.md):**
-- [ ] Rate limiting: `gofiber/limiter` — 100 req/min per user
+- [ ] Rate limiting: `golang.org/x/time/rate` + custom Gin middleware — 100 req/min per user
 - [ ] Rate limiting: Claude API calls — 1 per trade (idempotency key by trade ID)
 - [ ] Rate limiting: CCXT — single shared connection per exchange (multiplexing)
 - [ ] Claude API fallback: if call fails, store `status='pending'` and retry via Asynq
@@ -476,15 +480,35 @@ STRIPE_PRO_PRICE_ID=price_...
 
 ---
 
-## Engineering Guardrails (from CONTEXT.md)
+## Engineering Guardrails
 
+Full rationale for each principle is in **RATIONALE.md** under "Engineering Principles".
+
+### Clean Architecture
+- Dependencies flow inward only: Handler → Service → Repository → DB. Never reverse.
+- Handlers never import repository structs directly — only interfaces.
+- `internal/engine/` and `internal/worker/` have zero knowledge of Gin or HTTP.
+- Composition root is `cmd/api/main.go` — this is the only place concrete types are wired together.
+
+### SOLID
+- **Single Responsibility:** One file per concern — `handler.go`, `repository.go`, `service.go` per domain.
+- **Open/Closed:** AI provider is behind `internal/ai/` interface. New model = new file, no edits to handlers.
+- **Dependency Inversion:** Handlers depend on interfaces. Concrete implementations injected at startup.
+
+### 12-Factor App
+- **Config:** All config via env vars. Crash-fail at startup if required vars are missing. No silent defaults.
+- **Logs:** Structured JSON to stdout via `zerolog`. No log files written to disk.
+- **Disposability:** Graceful shutdown on SIGTERM — drain requests, flush Asynq, close DB pool.
+- **Dev/prod parity:** Docker Compose uses the same Postgres + Redis versions as production.
+- **Admin processes:** Migrations run as a one-off CI step before the new server starts. Never inside the running app.
+- **Processes:** Server is stateless per request. In-memory price cache (`sync.Map`) is acceptable at single-instance scale.
+
+### Additional Rules
 - **Never commit secrets.** All keys via environment variables. `.env` in `.gitignore`.
-- **Service abstraction for AI.** `internal/ai/` interface with Claude implementation — swappable.
-- **No raw SQL in handlers.** All queries in `repository.go` files.
-- **Ownership checks on every trade route.** Middleware, not per-handler.
-- **Crash-fail on missing env vars at startup.** No silent defaults in production.
-- **Migrations are forward-only.** No destructive `DROP` without explicit rollback file.
-- **PR required before merging to `main`.** CI must pass.
+- **No raw SQL in handlers.** All queries live in `repository.go` files.
+- **Ownership checks on every trade route.** Enforced in middleware, not per-handler.
+- **Migrations are forward-only.** No destructive `DROP` without an explicit rollback file.
+- **PR required before merging to `main`.** CI must pass (tests + Docker build).
 
 ---
 
