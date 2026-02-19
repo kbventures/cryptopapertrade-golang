@@ -34,15 +34,19 @@ Add entries here when a choice has real trade-offs worth remembering.
 
 ---
 
-### Backend Framework — Fiber over Gin
+### Backend Framework — Gin over Fiber (revised)
 
-**Chosen:** Fiber
-**Rejected:** Gin, Echo, stdlib net/http
+**Chosen:** Gin
+**Rejected:** Fiber (fasthttp), Echo, stdlib net/http
 **Why:**
-- Fasthttp-based; lower memory allocation per request — relevant for a server holding thousands of SSE connections
-- Middleware API is clean and close to Express, reducing onboarding friction
-- Built-in SSE support without third-party packages
-**Revisit if:** Fasthttp's lack of `net/http` compatibility causes issues with a third-party library we need
+- Fiber's fasthttp engine is not `net/http`-compatible; most Go middleware (OAuth, OTel, Prometheus, Clerk webhook validation) assumes standard types and will break or require an adaptor that eliminates Fiber's performance advantage
+- The SSE scaling argument (thousands of concurrent connections) does not apply at MVP scale — Gin/net/http handles SSE fine until a real bottleneck is measured
+- Gin is idiomatic, well-documented, and has a larger ecosystem; engineers expect it
+- Clerk JWT verification, Prometheus metrics, and OpenTelemetry tracing are all plug-and-play with net/http-based frameworks
+
+**If SSE volume ever justifies Fasthttp:** run a dedicated Fiber micro-service for the streaming endpoint only, keeping the core API on Gin. This isolates the optimisation instead of forcing the whole system onto a non-standard HTTP stack.
+
+**Revisit if:** profiling shows Gin is a genuine bottleneck on the SSE fan-out path at real traffic levels
 
 ---
 
