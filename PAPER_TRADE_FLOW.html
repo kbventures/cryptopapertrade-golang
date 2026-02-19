@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Flow</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #080c10;
+    color: #e0e8f0;
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse 60% 40% at 20% 50%, rgba(0,255,170,0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 80% 30%, rgba(0,150,255,0.04) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .diagram {
+    width: 100%;
+    max-width: 860px;
+    position: relative;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #00ffaa;
+    margin-bottom: 48px;
+    opacity: 0.7;
+  }
+
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  .node {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .spine {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 36px;
+  }
+
+  .dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+  }
+
+  .dot.green  { background: rgba(0,255,170,0.12); border: 1.5px solid #00ffaa; color: #00ffaa; }
+  .dot.blue   { background: rgba(0,150,255,0.12); border: 1.5px solid #0096ff; color: #0096ff; }
+  .dot.yellow { background: rgba(255,200,0,0.12);  border: 1.5px solid #ffc800; color: #ffc800; }
+  .dot.purple { background: rgba(180,100,255,0.12);border: 1.5px solid #b464ff; color: #b464ff; }
+  .dot.teal   { background: rgba(0,220,200,0.12);  border: 1.5px solid #00dcc8; color: #00dcc8; }
+
+  .line {
+    width: 1.5px;
+    flex: 1;
+    min-height: 32px;
+    background: linear-gradient(to bottom, currentColor 0%, transparent 100%);
+    opacity: 0.25;
+  }
+
+  .card {
+    flex: 1;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    background: rgba(255,255,255,0.025);
+    backdrop-filter: blur(4px);
+    transition: border-color 0.2s;
+  }
+
+  .card:hover { border-color: rgba(255,255,255,0.18); }
+
+  .card-label {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+
+  .card-sub {
+    font-size: 11px;
+    line-height: 1.6;
+    opacity: 0.5;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-top: 8px;
+    margin-right: 4px;
+    font-weight: 700;
+  }
+
+  .tag.redis  { background: rgba(255,80,80,0.15); color: #ff8080; border: 1px solid rgba(255,80,80,0.3); }
+  .tag.sql    { background: rgba(0,150,255,0.15); color: #60b8ff; border: 1px solid rgba(0,150,255,0.3); }
+  .tag.push   { background: rgba(0,255,170,0.12); color: #00ffaa; border: 1px solid rgba(0,255,170,0.3); }
+  .tag.ai     { background: rgba(180,100,255,0.15); color: #c080ff; border: 1px solid rgba(180,100,255,0.3); }
+  .tag.sse    { background: rgba(255,200,0,0.12); color: #ffd040; border: 1px solid rgba(255,200,0,0.3); }
+
+  .section-divider {
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.2);
+    margin-left: 56px;
+    margin-bottom: 10px;
+    margin-top: 4px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .fork {
+    display: flex;
+    gap: 12px;
+    margin-left: 56px;
+    margin-bottom: 12px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .fork-card {
+    flex: 1;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .fork-label {
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+    margin-left: 56px;
+    margin-bottom: 8px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .green-text  { color: #00ffaa; }
+  .blue-text   { color: #0096ff; }
+  .yellow-text { color: #ffc800; }
+  .purple-text { color: #b464ff; }
+  .teal-text   { color: #00dcc8; }
+</style>
+</head>
+<body>
+<div class="diagram">
+  <h1>Paper Trade — System Flow</h1>
+
+  <div class="flow">
+
+    <div class="section-divider">— opening a trade</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">◎</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card">
+        <div class="card-label green-text">User opens a paper trade</div>
+        <div class="card-sub">Sets entry price, stop-loss, and take-profit levels from the mobile app.</div>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Save open trade to database</div>
+        <div class="card-sub">Trade record created with status <code style="opacity:0.7">OPEN</code>, entry price, SL, and TP stored.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">⬡</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card">
+        <div class="card-label green-text">Server watches price feed</div>
+        <div class="card-sub">Continuous loop via SSE / WebSocket from exchange (CCXT). Tracks all open trades against their SL / TP levels.</div>
+        <span class="tag sse">SSE / WS</span>
+      </div>
+    </div>
+
+    <div class="section-divider">— price target hit</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot yellow">⚡</div>
+        <div class="line" style="color:#ffc800"></div>
+      </div>
+      <div class="card">
+        <div class="card-label yellow-text">Price hits Stop Loss or Take Profit</div>
+        <div class="card-sub">Condition matched — trade closure triggered instantly.</div>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Update trade record to CLOSED</div>
+        <div class="card-sub">Final P&L, exit price, and timestamp written. Status set to <code style="opacity:0.7">CLOSED</code>.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="fork-label">two things happen in parallel</div>
+    <div class="fork">
+      <div class="fork-card" style="border-color:rgba(0,255,170,0.2)">
+        <div class="card-label green-text" style="font-size:13px">Notify user</div>
+        <div class="card-sub">Push notification sent immediately — trade result delivered to mobile.</div>
+        <span class="tag push">Push notif</span>
+      </div>
+      <div class="fork-card" style="border-color:rgba(180,100,255,0.2)">
+        <div class="card-label purple-text" style="font-size:13px">Queue AI analysis job</div>
+        <div class="card-sub">Job pushed to Asynq / Redis. Server not blocked. Survives restarts.</div>
+        <span class="tag redis">Asynq / Redis</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot purple">⬡</div>
+        <div class="line" style="color:#b464ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label purple-text">Background worker calls Claude API</div>
+        <div class="card-sub">Sends trade data (entry, exit, chart context). Takes 3–10 s. Retries on failure.</div>
+        <span class="tag ai">Claude API</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Save AI analysis to trade record</div>
+        <div class="card-sub">Analysis attached to the existing closed trade row in Postgres.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot teal">◎</div>
+      </div>
+      <div class="card">
+        <div class="card-label teal-text">User views trade + AI critique</div>
+        <div class="card-sub">Mobile app fetches the closed trade — result and full AI breakdown available.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
