@@ -202,19 +202,26 @@ These are not single decisions but constraints that shape every implementation c
 
 **Clean Architecture**
 
-Dependencies only point inward: handlers → domain logic → repository → DB. Never the reverse.
+**Chosen:** Clean Architecture (layered dependency inversion)
+**Rejected:** Active Record, flat handler pattern, MVC, Transaction Script
+
+---
+
+**What it is**
+
+A layered structure where dependencies only point inward. Outer layers (HTTP, DB) know about inner layers (business logic), but never the reverse.
 
 ```
-HTTP Handler (Gin)
+HTTP Handler (Gin)          ← outermost: knows about services
       │  calls
       ▼
-  Service / Use Case  (pure business logic, no framework imports)
+  Service / Use Case         ← business logic: no framework imports
       │  calls
       ▼
-  Repository interface  (defined in the domain package)
+  Repository interface       ← defined in the domain package
       │  implemented by
       ▼
-  Postgres / Redis / Claude API
+  Postgres / Redis / Claude  ← outermost: infrastructure details
 ```
 
 - Handlers know about services; services do not know about Gin
@@ -222,6 +229,77 @@ HTTP Handler (Gin)
 - The matching engine (`internal/engine/`) has zero knowledge of HTTP or Postgres; it is pure Go functions
 
 **Practical rule:** If you need to import `gin` inside `internal/engine/` or `internal/trades/repository.go`, the boundary is wrong.
+
+---
+
+**Why Clean Architecture was chosen**
+
+**Testability without a running database**
+The single biggest payoff. Because repositories are interfaces, unit tests for business logic (PnL calculation, trade ownership, analysis formatting) inject a fake repository with no DB connection. Tests run in milliseconds. Without this boundary, every test that touches a service layer needs a real Postgres instance or a complex mock setup.
+
+**The matching engine is completely isolated**
+`internal/engine/` compares prices against open trades and calculates PnL. It has no HTTP dependency and no DB dependency. It is pure functions over plain Go structs. This means it can be tested exhaustively with table-driven tests, benchmarked independently, and replaced entirely without touching any handler or repository.
+
+**Framework lock-in is avoided**
+If Gin is swapped for another HTTP framework, only the handler files change. The service layer, repositories, and engine are unaffected. The same applies to the database driver — switching from `pgx` to `database/sql` only touches the repository implementation files.
+
+**The AI provider is swappable**
+`internal/ai/` defines an interface. The Claude implementation satisfies it. If a cheaper or faster model becomes available, a new implementation file is added and the composition root in `main.go` is updated — nothing else changes. This was a direct response to the CRITIQUE.md concern about tight coupling to a single AI provider.
+
+---
+
+**Alternatives considered and rejected**
+
+**Active Record**
+The model struct handles its own persistence — e.g. `trade.Save()` calls the DB directly. Popular in Rails and some Go ORMs (GORM).
+
+*Why rejected:*
+- Business logic and persistence are coupled in the same struct, making unit testing impossible without a real DB
+- Adding caching, auditing, or switching DB drivers requires modifying the model — violates Open/Closed
+- GORM's magic (hooks, associations) introduces unpredictable query behaviour that is hard to debug and tune
+
+**Flat handler pattern (all logic in handlers)**
+All DB calls, calculations, and external API calls written directly inside the Gin handler functions. Common in quick prototypes.
+
+*Why rejected:*
+- Handlers become untestable — you can't call a handler in a unit test without a full HTTP stack, DB, and external APIs
+- Logic duplicates across handlers (ownership checks, PnL formulas) because there is no shared service layer
+- A single handler file grows to hundreds of lines as features are added
+- Replacing any dependency (DB, auth, AI) requires editing every handler that touches it
+
+**MVC (Model-View-Controller)**
+Three layers: models (data), views (templates/JSON), controllers (request handling). Standard in web frameworks like Laravel, Django, Rails.
+
+*Why rejected for Go:*
+- "View" maps poorly to a JSON API — there is no template rendering
+- "Model" in MVC typically combines DB schema and business logic, creating the same coupling problem as Active Record
+- Go idioms favour composition and interfaces over inheritance-based MVC patterns
+- The domain packages (`trades/`, `engine/`, `worker/`) express the architecture more clearly than a `controllers/models/views/` split
+
+**Transaction Script**
+Each operation (open trade, close trade, calculate stats) is a standalone function with direct DB access. No layering.
+
+*Why rejected:*
+- Starts clean but degrades fast — shared logic (ownership checks, PnL) gets copy-pasted across scripts
+- No natural place for the matching engine, which needs to hold state (open trades map) between price ticks
+- Testing requires a real DB for every script
+
+---
+
+**Trade-offs and costs of Clean Architecture**
+
+It is not free. These are the real costs:
+
+| Cost | Detail |
+|---|---|
+| **More files** | A feature like "close a trade" touches `handler.go`, `service.go`, `repository.go`, and `models.go` instead of one file. Navigation requires understanding the layer structure. |
+| **Boilerplate interfaces** | Every repository needs an interface definition even when there is only one implementation. For a small project this feels over-engineered initially. |
+| **Indirection** | Tracing a bug requires following the call chain through multiple layers. A flat handler makes it easy to see everything in one place. |
+| **Slower to start** | The first feature takes longer to scaffold than it would with a flat approach. Productivity improves as the codebase grows. |
+
+**When it would be overkill:** A weekend script, a single-endpoint proxy, or any project that will never need unit tests or dependency swapping. For this project — with a matching engine, async workers, a swappable AI provider, and a requirement for testable PnL calculations — the layering pays for itself by Stage 4.
+
+**Revisit if:** The service layer turns out to be a thin pass-through with no real logic (handlers call repositories directly, services add nothing). If that happens, collapse the service layer and call repositories from handlers directly — do not add abstraction that carries no value.
 
 ---
 
