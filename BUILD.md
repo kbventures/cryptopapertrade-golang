@@ -117,8 +117,8 @@ CREATE TABLE trades (
     side         VARCHAR(10) NOT NULL,       -- 'long' | 'short'
     entry_price  NUMERIC(20,8) NOT NULL,
     exit_price   NUMERIC(20,8),
-    stop_loss    NUMERIC(20,8),              -- optional; engine auto-closes when price hits
-    take_profit  NUMERIC(20,8),              -- optional; engine auto-closes when price hits
+    stop_loss    NUMERIC(20,8) NOT NULL,      -- required; engine auto-closes when price hits
+    take_profit  NUMERIC(20,8) NOT NULL,     -- required; engine auto-closes when price hits
     quantity     NUMERIC(20,8) NOT NULL,
     status       VARCHAR(20) DEFAULT 'open', -- 'open' | 'closed'
     pnl          NUMERIC(20,8),
@@ -223,7 +223,7 @@ CCXT WebSocket (Binance/Coinbase)
 
 ## Stage 4 — Trade Matching Engine
 
-**Goal:** Open trades automatically close when the live price hits a target, or can be manually closed. PnL calculated server-side.
+**Goal:** Open trades automatically close when the live price hits the stop-loss or take-profit target. PnL calculated server-side. Manual close by the user is post-MVP.
 
 **Architecture:**
 ```
@@ -252,17 +252,17 @@ Hit detected → close trade in DB → fire Asynq job (→ Stage 6)
 **Endpoints:**
 ```
 GET    /api/v1/trades              list (pagination + filters: status, symbol, side)
-POST   /api/v1/trades              create new open trade
+POST   /api/v1/trades              create new open trade (SL + TP required)
 GET    /api/v1/trades/:id          get single trade
-PUT    /api/v1/trades/:id/close    manually close trade (triggers engine close)
 DELETE /api/v1/trades/:id          delete (own trades only)
+# PUT /api/v1/trades/:id/close    -- post-MVP: manual close by user
 GET    /api/v1/stats               win rate, avg PnL, total trades, best/worst trade
 ```
 
 **Tasks:**
 - [ ] `internal/trades/handler.go` — Gin route handlers
 - [ ] `internal/trades/repository.go` — all DB queries (no raw SQL in handlers)
-- [ ] Input validation: symbol format, quantity > 0, side in (long/short)
+- [ ] Input validation: symbol format, quantity > 0, side in (long/short), SL and TP both present and logically valid (SL < entry for long, TP > entry for long; inverse for short)
 - [ ] Ownership check middleware: user can only access their own trades
 - [ ] Pagination: cursor-based (use `opened_at + id` as cursor)
 - [ ] `GET /api/v1/stats` computed from DB aggregates
@@ -379,8 +379,8 @@ UPSTASH_REDIS_URL=rediss://...
 | Screen | Key Features |
 |---|---|
 | **Dashboard** | Active trades list, portfolio PnL, win-rate chip, "New Trade" FAB |
-| **NewTradeScreen** | Exchange picker, symbol input, entry price, quantity, Long/Short toggle, notes |
-| **TradeDetailScreen** | Live price via SSE, entry vs current, PnL %, close button, AI critique tab |
+| **NewTradeScreen** | Exchange picker, symbol input, entry price, quantity, Long/Short toggle, stop-loss, take-profit, notes |
+| **TradeDetailScreen** | Live price via SSE, entry vs current, PnL %, AI critique tab (no manual close — post-MVP) |
 | **HistoryScreen** | Closed trades, filter by date range / symbol / P&L sign, pull-to-refresh |
 | **AnalysisScreen** | Per-trade critiques list, aggregate patterns, "Analyze all" button |
 | **SettingsScreen** | Subscription status, upgrade CTA, sign out |
@@ -533,5 +533,58 @@ The following are **post-MVP** (do not block initial release):
 - Multiple exchanges — start with Binance only
 - Apple Sign-In — Google only for v1
 - Export/import trades
-- Charting (TradingView)
 - Social/leaderboard features
+
+---
+
+## Future Phases (Post-MVP, in order)
+
+Build these incrementally after the core MVP ships. Each phase is independent and builds on the previous.
+
+---
+
+### Phase A — Modify Open Trade (SL/TP adjustment)
+
+**What:** User can update the stop-loss or take-profit on an open trade after it has been placed.
+
+**Why:** Lets users trail their stop or move their target as the trade develops — a core real-trading behaviour.
+
+**Backend:**
+- `PATCH /api/v1/trades/:id` — update `stop_loss` and/or `take_profit`; re-validate logic (SL < entry for long, etc.)
+- Matching engine reloads the updated values from DB immediately (or via an in-memory update message on the trade map)
+
+**Mobile:**
+- Edit fields on TradeDetailScreen; save sends the PATCH request
+- Optimistic UI update
+
+---
+
+### Phase B — Manual Trade Close (user-initiated)
+
+**What:** User can close an open paper trade at any time at the current live price, bypassing SL/TP.
+
+**Why:** Simulates real trading where a trader exits a position early based on their own judgement.
+
+**Architecture:**
+```
+Client ──WS──→ Binance          (client-maintained candlestick chart — no server load)
+
+User taps "Close Trade"
+      │
+      ▼
+POST /api/v1/trades/:id/close ──→ Go server
+      │  same code path as auto-close
+      ▼
+Engine closes trade at current price → PnL calculated → Asynq job → AI post-mortem
+```
+
+**Key point:** The client opens its own WebSocket directly to Binance for the candlestick chart. This connection is between the user's device and Binance — it does not pass through the Go server and imposes no server load regardless of how many users have charts open. The server's own CCXT connection (for auto-close monitoring) is completely separate.
+
+**Backend:**
+- `PUT /api/v1/trades/:id/close` — closes at current live price; adds `close_reason` field: `'sl' | 'tp' | 'manual'`
+- DB migration: add `close_reason VARCHAR(10)` to `trades` table
+
+**Mobile:**
+- `useCandleStream(symbol)` hook — opens WebSocket directly to Binance public market data stream
+- Candlestick chart on TradeDetailScreen (library TBD: `react-native-wagmi-charts` or TradingView `lightweight-charts` in a WebView)
+- "Close Trade" button sends `PUT` request; same result as an auto-close from the user's perspective

@@ -6,7 +6,7 @@ A mobile app for paper trading crypto — practice trading with real-time prices
 
 ## What it does
 
-- Open a paper trade (symbol, side, entry price, optional SL/TP)
+- Open a paper trade (symbol, side, entry price, stop-loss, take-profit)
 - Server streams live prices via CCXT WebSockets and auto-closes trades when targets are hit
 - Closed trades trigger a background AI analysis job (Claude API)
 - Mobile app receives live price updates via SSE; push notifications when a trade closes
@@ -32,21 +32,31 @@ A mobile app for paper trading crypto — practice trading with real-time prices
 
 ---
 
-## Monorepo Layout
+## Repository Layout
+
+This is the backend API repository. Mobile and desktop live in separate repos.
+
+| Repo | Contents |
+|---|---|
+| `cryptopapertrader-api` | Go backend (this repo) |
+| `cryptopapertrader-mobile` | React Native (Expo) |
+| `cryptopapertrader-desktop` | Desktop app (not started) |
 
 ```
-cryptopapertrade-api/
-├── apps/
-│   ├── server/          # Go backend (Gin)
-│   ├── mobile/          # React Native (Expo)
-│   └── desktop/         # Placeholder — not started yet
-├── packages/
-│   └── types/           # Shared TypeScript types
+cryptopapertrader-api/
+├── cmd/
+│   └── api/
+│       └── main.go          # composition root
+├── internal/
+│   ├── auth/                # Clerk middleware + webhook handler
+│   ├── trades/              # handler + service + repository
+│   ├── engine/              # price matching, PnL — no HTTP/DB imports
+│   ├── worker/              # Asynq task definitions and handlers
+│   ├── database/            # connection pool, migration runner
+│   └── models/              # shared Go structs matching DB tables
 ├── .github/
 │   └── workflows/
-│       ├── deploy-server.yml
-│       └── deploy-mobile.yml
-├── pnpm-workspace.yaml
+│       └── deploy-server.yml
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -62,16 +72,12 @@ cryptopapertrade-api/
 docker-compose up -d
 
 # Run backend
-cd apps/server
-cp ../../.env.example .env   # fill in values
+cp .env.example .env   # fill in values
 go mod download
 go run cmd/api/main.go
-
-# Run mobile app (separate terminal)
-cd apps/mobile
-pnpm install
-npx expo start
 ```
+
+Mobile development lives in the `cryptopapertrader-mobile` repo.
 
 ---
 

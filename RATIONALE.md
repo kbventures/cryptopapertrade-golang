@@ -353,6 +353,20 @@ These are not optional — each one maps to a concrete implementation rule.
 
 ---
 
+### Trade Closure — Mandatory SL/TP, Manual Close Post-MVP
+
+**Chosen:** Stop-loss and take-profit are required fields on every trade. Trades close only when the engine hits a target. Manual user-initiated close is deferred to post-MVP.
+**Rejected:** Optional SL/TP with immediate manual close support.
+**Why:**
+- Mandatory SL/TP enforces disciplined risk management — the core habit the app is trying to teach. A trade with no exit plan is not a paper trade, it's an open-ended position.
+- Logical validation (SL below entry for longs, above for shorts) can be enforced at the API layer without ambiguity when both fields are always present.
+- The DB schema stays clean: `stop_loss NOT NULL`, `take_profit NOT NULL`. No nullable handling in the matching engine.
+- Manual close adds meaningful complexity: a new API endpoint, UI affordance, and a separate close-reason field in the DB (SL hit / TP hit / manual). Deferring it keeps Stage 4 and Stage 5 focused.
+- Manual close is the natural next feature after MVP — the groundwork (close logic in the engine, the `PUT /trades/:id/close` stub in the API) is already identified and documented.
+**Revisit if:** User research shows mandatory SL/TP is a significant onboarding blocker.
+
+---
+
 ### Desktop App Framework — Decision Deferred
 
 **Chosen:** Placeholder `apps/desktop/` directory in Stage 0; framework decided when desktop scope is defined

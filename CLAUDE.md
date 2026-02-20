@@ -36,7 +36,6 @@ Update this line when a stage is complete.
 ```bash
 # Local dev
 make dev          # start Docker services + Go server
-make mobile       # start Expo dev server
 make test         # run Go tests
 make lint         # run golangci-lint
 make migrate      # run DB migrations
@@ -47,12 +46,9 @@ docker-compose down           # stop services
 docker-compose logs -f        # tail logs
 
 # Go
-go run apps/server/cmd/api/main.go
+go run cmd/api/main.go
 go test ./...
 go mod tidy
-
-# Mobile
-cd apps/mobile && npx expo start
 ```
 
 ---
