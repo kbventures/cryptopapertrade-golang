@@ -22,37 +22,23 @@ For the full staged roadmap see **BUILD.md**. This file tracks the current tech 
 
 ---
 
-## Monorepo Layout
+## Repo Layout
+
+This repo is the Go backend only. Mobile is a separate repo.
 
 ```
-cryptopapertrade-api/
-├── apps/
-│   ├── server/          # Go backend (Gin)
-│   │   ├── cmd/api/main.go
-│   │   ├── internal/
-│   │   │   ├── auth/
-│   │   │   ├── trades/
-│   │   │   ├── payments/
-│   │   │   ├── analysis/
-│   │   │   └── database/
-│   │   ├── migrations/
-│   │   ├── Dockerfile
-│   │   └── go.mod
-│   ├── mobile/          # React Native (Expo)
-│   │   ├── app/         # Expo Router screens
-│   │   ├── lib/         # API client, hooks
-│   │   ├── components/
-│   │   ├── app.json
-│   │   └── package.json
-│   └── desktop/         # Placeholder — do not build yet
-├── packages/
-│   └── types/           # Shared TypeScript types
-├── .github/
-│   └── workflows/
-│       ├── deploy-server.yml
-│       └── deploy-mobile.yml
-├── pnpm-workspace.yaml
+cryptopapertrader-api/
+├── cmd/api/main.go
+├── internal/
+│   ├── auth/
+│   ├── trades/
+│   ├── payments/
+│   ├── analysis/
+│   └── database/
+├── migrations/
+├── Dockerfile
 ├── docker-compose.yml
+├── go.mod
 └── .env.example
 ```
 
@@ -138,14 +124,9 @@ CLERK_PUBLISHABLE_KEY=pk_...
 **Goal:** Push to `main` triggers backend tests + Docker build. Foundation for later Fly.io deploy.
 
 **Backend — `.github/workflows/deploy-server.yml`:**
-- [ ] Trigger: push to `main`, paths `apps/server/**`
+- [ ] Trigger: push to `main`
 - [ ] Steps: checkout → `go test ./...` → Docker build (no push yet)
 - [ ] Add Fly.io deploy step once hosting is provisioned
-
-**Mobile — `.github/workflows/deploy-mobile.yml`:**
-- [ ] Trigger: push to `main`, paths `apps/mobile/**`
-- [ ] Steps: checkout → `pnpm install` → `eas build --platform all --non-interactive`
-- [ ] Add EAS submit step for App Store / Play Store when ready
 
 **GitHub Secrets needed:**
 ```

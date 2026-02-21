@@ -17,21 +17,26 @@
 
 ---
 
-## Monorepo Layout
+## Repo Layout
 
 ```
-cryptopapertrade-api/
-├── apps/
-│   ├── server/          # Go backend (Gin)
-│   ├── mobile/          # React Native (Expo)
-│   └── desktop/         # Future: Tauri (placeholder — do not build yet)
-├── packages/
-│   └── types/           # Shared TypeScript types (kept in sync with Go API shapes)
-├── .github/
-│   └── workflows/
-├── pnpm-workspace.yaml
-└── BUILD.md
+cryptopapertrader-api/       # this repo — Go backend only
+├── cmd/api/main.go
+├── internal/
+│   ├── auth/
+│   ├── trades/
+│   ├── engine/
+│   ├── worker/
+│   ├── database/
+│   └── models/
+├── migrations/
+├── Dockerfile
+├── docker-compose.yml
+├── go.mod
+└── .env.example
 ```
+
+Mobile and desktop are separate repos.
 
 ---
 
@@ -39,7 +44,7 @@ cryptopapertrade-api/
 
 | Stage | Name | Output | Blocks |
 |---|---|---|---|
-| **0** | Monorepo Skeleton | Folder structure, tooling, CI stub | Nothing |
+| **0** | Repo Skeleton | Folder structure, tooling, CI stub | Nothing |
 | **1** | DB Schema + Go Foundation | Migrations, models, DB pool, health check | Stage 2+ |
 | **2** | Clerk Auth | User sync webhook, JWT middleware, `/me` endpoint | Stage 3+ |
 | **3** | Price Watcher | CCXT WebSocket feed, in-memory sync.Map | Stage 4 |
@@ -55,22 +60,20 @@ cryptopapertrade-api/
 
 ---
 
-## Stage 0 — Monorepo Skeleton
+## Stage 0 — Repo Skeleton
 
 **Goal:** Every developer (and Claude Code) can clone and immediately understand where everything lives.
 
 **Tasks:**
-- [ ] Init repo with `pnpm-workspace.yaml`
-- [ ] Create `apps/server` with Go module (`go mod init`)
-- [ ] Create `apps/mobile` with `npx create-expo-app`
-- [ ] Create `apps/desktop/` as an empty placeholder directory with a `README.md` noting "Tauri app — not started yet"
-- [ ] Create `packages/types` with empty `package.json`
-- [ ] Add root `.gitignore` (Go, Node, .env)
+- [ ] Init Go module at repo root (`go mod init github.com/yourusername/cryptopapertrader-api`)
+- [ ] Create `cmd/api/main.go` stub (health check only)
+- [ ] Create `internal/` package structure (empty files per domain)
+- [ ] Add `.gitignore` (Go, .env)
 - [ ] Add `.env.example` with all required keys (no values)
 - [ ] Add `docker-compose.yml` for local Postgres + Redis
 - [ ] Add stub `README.md`
 
-**Deliverable:** `docker-compose up` starts Postgres and Redis. Go and Expo apps can run independently.
+**Deliverable:** `docker-compose up` starts Postgres and Redis. `go run cmd/api/main.go` starts the server.
 
 **Environment variables needed at this stage:**
 ```
@@ -171,9 +174,13 @@ CREATE TABLE subscriptions (
 
 *Backend:*
 - [ ] `POST /webhooks/clerk` — verify `svix` signature, handle `user.created` / `user.updated` / `user.deleted`, upsert into `users` table
-- [ ] `internal/middleware/auth.go` — fetch Clerk JWKS, validate Bearer token, attach `userID` to context
+- [ ] On `user.created`: after DB upsert, call Clerk backend API to write `publicMetadata.internal_id = <uuid>` — this embeds our internal UUID into all future JWTs for that user (eliminates per-request DB lookup; see RATIONALE.md — Session Caching)
+- [ ] `internal/middleware/auth.go` — fetch Clerk JWKS, validate Bearer token, read `internal_id` claim from token, attach to context as `userID`; fall back to `SELECT id FROM users WHERE clerk_id = $1` if claim is absent (handles tokens issued before the metadata was set)
 - [ ] `GET /api/v1/me` — protected route returning current user
 - [ ] Go packages: `lestrrat-go/jwx/v2` (JWKS + JWT), `svix-webhooks/svix-go`
+
+*Clerk dashboard (one-time setup):*
+- [ ] In Clerk JWT template, add custom claim: `"internal_id": "{{user.public_metadata.internal_id}}"` — this tells Clerk to include the field in every issued token
 
 *Mobile (deferred to Stage 8, but configure now):*
 - [ ] Add Clerk publishable key to `apps/mobile/.env`
@@ -186,7 +193,9 @@ CLERK_WEBHOOK_SECRET=whsec_...
 CLERK_JWKS_URL=https://your-clerk-domain/.well-known/jwks.json
 ```
 
-**Deliverable:** A Clerk test user making a request to `/api/v1/me` with their JWT receives their profile. Webhook creates the DB row automatically.
+**Note on session caching:** There is no Redis session cache and no per-request Postgres user lookup at steady state. The internal UUID is embedded in the JWT via Clerk's JWT template + `publicMetadata`. The auth middleware reads it directly from the verified token — no DB hit, no cache invalidation logic, no extra infrastructure. Full rationale in RATIONALE.md under "Session Caching".
+
+**Deliverable:** A Clerk test user making a request to `/api/v1/me` with their JWT receives their profile. Webhook creates the DB row and sets `publicMetadata.internal_id`. Subsequent tokens contain the claim; middleware reads it without touching Postgres.
 
 ---
 
@@ -329,6 +338,7 @@ UPSTASH_REDIS_URL=rediss://...
 - [ ] Each SSE client goroutine reads from channel, writes `data: {symbol, price, ts}\n\n`
 - [ ] Heartbeat every 30s to prevent proxy timeouts
 - [ ] Clean up disconnected clients
+- [ ] Implementation: Gin's built-in `c.Stream()` + `c.SSEvent()` — no extra SSE library (see RATIONALE.md)
 
 *Push Notifications:*
 - [ ] Store Expo push token per user in `users` table (`push_token` column)
@@ -431,19 +441,13 @@ STRIPE_PRO_PRICE_ID=price_...
 **Tasks:**
 
 *Backend — `.github/workflows/deploy-server.yml`:*
-- [ ] Trigger on push to `main` with changes in `apps/server/**`
+- [ ] Trigger on push to `main`
 - [ ] Steps: checkout → Go test → Docker build → `flyctl deploy`
 - [ ] Run DB migrations as part of deploy (`flyctl ssh console -C "migrate up"`)
 - [ ] Secrets: `FLY_API_TOKEN`, `DATABASE_URL`, `CLERK_SECRET_KEY`, `ANTHROPIC_API_KEY`, etc.
 
-*Mobile — `.github/workflows/deploy-mobile.yml`:*
-- [ ] Trigger on push to `main` with changes in `apps/mobile/**`
-- [ ] Steps: checkout → pnpm install → `eas build --platform all --non-interactive`
-- [ ] On tag `v*`: `eas submit` to TestFlight + Play Console
-- [ ] Secrets: `EXPO_TOKEN`, `CLERK_PUBLISHABLE_KEY`
-
 *Fly.io setup (one-time):*
-- [ ] `fly launch` inside `apps/server`
+- [ ] `fly launch` at repo root
 - [ ] `fly postgres create` and attach
 - [ ] `fly secrets set` for all env vars
 - [ ] Set `fly scale count 2` for zero-downtime deploys

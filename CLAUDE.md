@@ -88,7 +88,7 @@ These are non-negotiable. Violating them introduces bugs or security issues.
 ## Package Conventions (Go)
 
 ```
-apps/server/
+cryptopapertrader-api/       # repo root
 ├── cmd/api/main.go          # composition root — wire everything here
 ├── internal/
 │   ├── auth/                # Clerk middleware + webhook handler

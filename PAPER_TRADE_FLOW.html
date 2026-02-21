@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trade Flow</title>
+<title>Paper Trade — System Flow</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
 
@@ -15,9 +15,9 @@
     font-family: 'Space Mono', monospace;
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    padding: 40px 20px;
+    padding: 40px 20px 80px;
     overflow-x: hidden;
   }
 
@@ -25,7 +25,7 @@
     content: '';
     position: fixed;
     inset: 0;
-    background: 
+    background:
       radial-gradient(ellipse 60% 40% at 20% 50%, rgba(0,255,170,0.04) 0%, transparent 70%),
       radial-gradient(ellipse 40% 60% at 80% 30%, rgba(0,150,255,0.04) 0%, transparent 70%);
     pointer-events: none;
@@ -33,7 +33,7 @@
 
   .diagram {
     width: 100%;
-    max-width: 860px;
+    max-width: 880px;
     position: relative;
   }
 
@@ -44,28 +44,80 @@
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: #00ffaa;
-    margin-bottom: 48px;
+    margin-bottom: 28px;
     opacity: 0.7;
   }
 
-  .flow {
+  /* ── Version tabs ── */
+  .vtabs {
     display: flex;
-    flex-direction: column;
-    gap: 0;
-    position: relative;
+    gap: 8px;
+    margin-bottom: 20px;
   }
+
+  .vtab {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 9px 20px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.02);
+    color: rgba(255,255,255,0.3);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .vtab:hover { color: rgba(255,255,255,0.55); border-color: rgba(255,255,255,0.18); }
+
+  .vtab.active[data-v="1"] { color: #00ffaa; border-color: rgba(0,255,170,0.45); background: rgba(0,255,170,0.07); }
+  .vtab.active[data-v="2"] { color: #0096ff; border-color: rgba(0,150,255,0.45); background: rgba(0,150,255,0.07); }
+  .vtab.active[data-v="3"] { color: #b464ff; border-color: rgba(180,100,255,0.45); background: rgba(180,100,255,0.07); }
+
+  .vdesc {
+    font-size: 11px;
+    line-height: 1.75;
+    opacity: 0.38;
+    margin-bottom: 36px;
+    display: none;
+    max-width: 620px;
+  }
+  .vdesc.active { display: block; }
+  .vdesc em { font-style: normal; color: #ffc800; opacity: 1; }
+
+  /* ── Flow ── */
+  .flow { display: none; flex-direction: column; gap: 0; }
+  .flow.active { display: flex; }
 
   .node {
     display: flex;
     align-items: flex-start;
     gap: 20px;
-    animation: fadeUp 0.5s ease both;
+    animation: fadeUp 0.38s ease both;
   }
 
   @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(16px); }
+    from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
   }
+
+  .node:nth-child(1)  { animation-delay: 0.00s; }
+  .node:nth-child(2)  { animation-delay: 0.04s; }
+  .node:nth-child(3)  { animation-delay: 0.08s; }
+  .node:nth-child(4)  { animation-delay: 0.12s; }
+  .node:nth-child(5)  { animation-delay: 0.16s; }
+  .node:nth-child(6)  { animation-delay: 0.20s; }
+  .node:nth-child(7)  { animation-delay: 0.24s; }
+  .node:nth-child(8)  { animation-delay: 0.28s; }
+  .node:nth-child(9)  { animation-delay: 0.32s; }
+  .node:nth-child(10) { animation-delay: 0.36s; }
+  .node:nth-child(11) { animation-delay: 0.40s; }
+  .node:nth-child(12) { animation-delay: 0.44s; }
+  .node:nth-child(13) { animation-delay: 0.48s; }
+  .node:nth-child(14) { animation-delay: 0.52s; }
+  .node:nth-child(15) { animation-delay: 0.56s; }
 
   .spine {
     display: flex;
@@ -89,18 +141,20 @@
     z-index: 2;
   }
 
-  .dot.green  { background: rgba(0,255,170,0.12); border: 1.5px solid #00ffaa; color: #00ffaa; }
-  .dot.blue   { background: rgba(0,150,255,0.12); border: 1.5px solid #0096ff; color: #0096ff; }
+  .dot.green  { background: rgba(0,255,170,0.12);  border: 1.5px solid #00ffaa; color: #00ffaa; }
+  .dot.blue   { background: rgba(0,150,255,0.12);  border: 1.5px solid #0096ff; color: #0096ff; }
   .dot.yellow { background: rgba(255,200,0,0.12);  border: 1.5px solid #ffc800; color: #ffc800; }
   .dot.purple { background: rgba(180,100,255,0.12);border: 1.5px solid #b464ff; color: #b464ff; }
   .dot.teal   { background: rgba(0,220,200,0.12);  border: 1.5px solid #00dcc8; color: #00dcc8; }
+  .dot.orange { background: rgba(255,140,0,0.12);  border: 1.5px solid #ff8c00; color: #ff8c00; }
+  .dot.rose   { background: rgba(255,80,120,0.12); border: 1.5px solid #ff5078; color: #ff5078; }
 
   .line {
     width: 1.5px;
     flex: 1;
     min-height: 32px;
     background: linear-gradient(to bottom, currentColor 0%, transparent 100%);
-    opacity: 0.25;
+    opacity: 0.22;
   }
 
   .card {
@@ -109,24 +163,48 @@
     border-radius: 10px;
     padding: 16px 20px;
     margin-bottom: 12px;
-    background: rgba(255,255,255,0.025);
+    background: rgba(255,255,255,0.022);
     backdrop-filter: blur(4px);
     transition: border-color 0.2s;
+    position: relative;
   }
 
-  .card:hover { border-color: rgba(255,255,255,0.18); }
+  .card:hover { border-color: rgba(255,255,255,0.16); }
+
+  .card.is-new {
+    border-color: rgba(255,200,0,0.2);
+    background: rgba(255,200,0,0.028);
+  }
 
   .card-label {
     font-family: 'Syne', sans-serif;
     font-weight: 700;
     font-size: 14px;
-    margin-bottom: 4px;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .new-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(255,200,0,0.14);
+    color: #ffc800;
+    border: 1px solid rgba(255,200,0,0.3);
+    flex-shrink: 0;
   }
 
   .card-sub {
     font-size: 11px;
-    line-height: 1.6;
-    opacity: 0.5;
+    line-height: 1.65;
+    opacity: 0.48;
   }
 
   .tag {
@@ -136,52 +214,66 @@
     text-transform: uppercase;
     padding: 2px 7px;
     border-radius: 4px;
-    margin-top: 8px;
+    margin-top: 9px;
     margin-right: 4px;
     font-weight: 700;
   }
 
-  .tag.redis  { background: rgba(255,80,80,0.15); color: #ff8080; border: 1px solid rgba(255,80,80,0.3); }
-  .tag.sql    { background: rgba(0,150,255,0.15); color: #60b8ff; border: 1px solid rgba(0,150,255,0.3); }
-  .tag.push   { background: rgba(0,255,170,0.12); color: #00ffaa; border: 1px solid rgba(0,255,170,0.3); }
-  .tag.ai     { background: rgba(180,100,255,0.15); color: #c080ff; border: 1px solid rgba(180,100,255,0.3); }
-  .tag.sse    { background: rgba(255,200,0,0.12); color: #ffd040; border: 1px solid rgba(255,200,0,0.3); }
+  .tag.redis  { background: rgba(255,80,80,0.15);   color: #ff8080; border: 1px solid rgba(255,80,80,0.3); }
+  .tag.sql    { background: rgba(0,150,255,0.14);   color: #60b8ff; border: 1px solid rgba(0,150,255,0.3); }
+  .tag.push   { background: rgba(0,255,170,0.11);   color: #00ffaa; border: 1px solid rgba(0,255,170,0.3); }
+  .tag.ai     { background: rgba(180,100,255,0.14); color: #c080ff; border: 1px solid rgba(180,100,255,0.3); }
+  .tag.sse    { background: rgba(255,200,0,0.11);   color: #ffd040; border: 1px solid rgba(255,200,0,0.3); }
+  .tag.stripe { background: rgba(100,80,255,0.14);  color: #9080ff; border: 1px solid rgba(100,80,255,0.3); }
+  .tag.ws     { background: rgba(0,220,200,0.11);   color: #00dcc8; border: 1px solid rgba(0,220,200,0.3); }
+  .tag.export { background: rgba(255,140,0,0.11);   color: #ffa040; border: 1px solid rgba(255,140,0,0.3); }
+  .tag.social { background: rgba(255,80,120,0.11);  color: #ff5078; border: 1px solid rgba(255,80,120,0.3); }
 
   .section-divider {
     font-size: 9px;
-    letter-spacing: 0.2em;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.18);
     margin-left: 56px;
     margin-bottom: 10px;
     margin-top: 4px;
-    animation: fadeUp 0.5s ease both;
-  }
-
-  .fork {
-    display: flex;
-    gap: 12px;
-    margin-left: 56px;
-    margin-bottom: 12px;
-    animation: fadeUp 0.5s ease both;
-  }
-
-  .fork-card {
-    flex: 1;
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 10px;
-    padding: 14px 16px;
-    background: rgba(255,255,255,0.02);
+    animation: fadeUp 0.38s ease both;
   }
 
   .fork-label {
     font-size: 9px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.22);
     margin-left: 56px;
     margin-bottom: 8px;
-    animation: fadeUp 0.5s ease both;
+    animation: fadeUp 0.38s ease both;
+  }
+
+  .fork {
+    display: flex;
+    gap: 10px;
+    margin-left: 56px;
+    margin-bottom: 12px;
+    animation: fadeUp 0.38s ease both;
+  }
+
+  .fork-card {
+    flex: 1;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px;
+    padding: 14px 15px;
+    background: rgba(255,255,255,0.018);
+    min-width: 0;
+  }
+
+  .fork-card .card-label {
+    font-size: 13px;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .green-text  { color: #00ffaa; }
@@ -189,13 +281,35 @@
   .yellow-text { color: #ffc800; }
   .purple-text { color: #b464ff; }
   .teal-text   { color: #00dcc8; }
+  .orange-text { color: #ff8c00; }
+  .rose-text   { color: #ff5078; }
 </style>
 </head>
 <body>
 <div class="diagram">
   <h1>Paper Trade — System Flow</h1>
 
-  <div class="flow">
+  <div class="vtabs">
+    <button class="vtab active" data-v="1">v1 · MVP</button>
+    <button class="vtab" data-v="2">v2 · Post-MVP</button>
+    <button class="vtab" data-v="3">v3 · Vision</button>
+  </div>
+
+  <div class="vdesc active" id="vdesc-1">
+    Core trade lifecycle. Open a position with entry price, stop-loss, and take-profit. The server watches live prices via CCXT WebSockets and auto-closes the trade when a target is hit. An AI post-mortem is queued via Asynq and stored in Postgres. The foundation every other stage builds on.
+  </div>
+  <div class="vdesc" id="vdesc-2">
+    Adds everything identified as post-MVP in BUILD.md: live SSE prices to the active mobile session, user-initiated manual close, mid-trade SL/TP edits, Stripe subscription gating, close-reason tracking, and a second "analysis ready" push. Nodes new to this version are marked <em>new</em>.
+  </div>
+  <div class="vdesc" id="vdesc-3">
+    Forward-looking. Multi-exchange CCXT watchers, backtesting overlay before entry, custom alert engine (RSI / MA / volume), vector-similarity AI context, aggregate weekly pattern detection, portfolio analytics, social feed, and export. Nodes new to this version are marked <em>new</em>.
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════
+       V1 — MVP
+  ═══════════════════════════════════════════ -->
+  <div class="flow active" id="flow-1">
 
     <div class="section-divider">— opening a trade</div>
 
@@ -206,7 +320,7 @@
       </div>
       <div class="card">
         <div class="card-label green-text">User opens a paper trade</div>
-        <div class="card-sub">Sets entry price, stop-loss, and take-profit levels from the mobile app.</div>
+        <div class="card-sub">Submits entry price, stop-loss, take-profit, symbol, side (long / short), quantity, and optional notes from the mobile app.</div>
       </div>
     </div>
 
@@ -217,7 +331,7 @@
       </div>
       <div class="card">
         <div class="card-label blue-text">Save open trade to database</div>
-        <div class="card-sub">Trade record created with status <code style="opacity:0.7">OPEN</code>, entry price, SL, and TP stored.</div>
+        <div class="card-sub">Trade record created with status <code style="opacity:0.7">OPEN</code>. Entry price, SL, TP, symbol, side, and quantity persisted. Trade also loaded into the in-memory <code style="opacity:0.7">sync.Map</code> for the matching engine.</div>
         <span class="tag sql">Postgres</span>
       </div>
     </div>
@@ -228,9 +342,9 @@
         <div class="line" style="color:#00ffaa"></div>
       </div>
       <div class="card">
-        <div class="card-label green-text">Server watches price feed</div>
-        <div class="card-sub">Continuous loop via SSE / WebSocket from exchange (CCXT). Tracks all open trades against their SL / TP levels.</div>
-        <span class="tag sse">SSE / WS</span>
+        <div class="card-label green-text">Price watcher monitors the feed</div>
+        <div class="card-sub">CCXT WebSocket goroutine per exchange streams live ticks. On each tick, matching engine compares price against every open trade's SL and TP held in <code style="opacity:0.7">sync.Map</code> — no DB reads in the hot path.</div>
+        <span class="tag ws">CCXT WS</span>
       </div>
     </div>
 
@@ -243,7 +357,7 @@
       </div>
       <div class="card">
         <div class="card-label yellow-text">Price hits Stop Loss or Take Profit</div>
-        <div class="card-sub">Condition matched — trade closure triggered instantly.</div>
+        <div class="card-sub">Engine detects the condition. PnL calculated server-side: <code style="opacity:0.7">(exit − entry) / entry × 100</code> for longs; inverted for shorts. Closure triggered immediately.</div>
       </div>
     </div>
 
@@ -253,8 +367,8 @@
         <div class="line" style="color:#0096ff"></div>
       </div>
       <div class="card">
-        <div class="card-label blue-text">Update trade record to CLOSED</div>
-        <div class="card-sub">Final P&L, exit price, and timestamp written. Status set to <code style="opacity:0.7">CLOSED</code>.</div>
+        <div class="card-label blue-text">Update trade to CLOSED</div>
+        <div class="card-sub">DB transaction: exit price, PnL, PnL%, and <code style="opacity:0.7">closed_at</code> timestamp written atomically. Status set to <code style="opacity:0.7">CLOSED</code>. Trade evicted from in-memory map.</div>
         <span class="tag sql">Postgres</span>
       </div>
     </div>
@@ -262,13 +376,13 @@
     <div class="fork-label">two things happen in parallel</div>
     <div class="fork">
       <div class="fork-card" style="border-color:rgba(0,255,170,0.2)">
-        <div class="card-label green-text" style="font-size:13px">Notify user</div>
-        <div class="card-sub">Push notification sent immediately — trade result delivered to mobile.</div>
-        <span class="tag push">Push notif</span>
+        <div class="card-label green-text">Notify user</div>
+        <div class="card-sub">Push notification delivered immediately — trade closed, result included.</div>
+        <span class="tag push">Push</span>
       </div>
       <div class="fork-card" style="border-color:rgba(180,100,255,0.2)">
-        <div class="card-label purple-text" style="font-size:13px">Queue AI analysis job</div>
-        <div class="card-sub">Job pushed to Asynq / Redis. Server not blocked. Survives restarts.</div>
+        <div class="card-label purple-text">Queue AI analysis</div>
+        <div class="card-sub">Asynq job pushed to Redis. Server not blocked. Survives restarts. Deduplicated by trade ID — no double-calls on race conditions.</div>
         <span class="tag redis">Asynq / Redis</span>
       </div>
     </div>
@@ -280,7 +394,7 @@
       </div>
       <div class="card">
         <div class="card-label purple-text">Background worker calls Claude API</div>
-        <div class="card-sub">Sends trade data (entry, exit, chart context). Takes 3–10 s. Retries on failure.</div>
+        <div class="card-sub">Sends trade data — entry, exit, PnL, symbol, side, notes — plus the user's last 10 closed trades for context. Response takes 3–10 s. Exponential backoff retries on failure. If all retries fail, stored as <code style="opacity:0.7">status='pending'</code> for a future retry pass.</div>
         <span class="tag ai">Claude API</span>
       </div>
     </div>
@@ -291,8 +405,8 @@
         <div class="line" style="color:#0096ff"></div>
       </div>
       <div class="card">
-        <div class="card-label blue-text">Save AI analysis to trade record</div>
-        <div class="card-sub">Analysis attached to the existing closed trade row in Postgres.</div>
+        <div class="card-label blue-text">Save AI critique to database</div>
+        <div class="card-sub">Critique stored in <code style="opacity:0.7">ai_critiques</code> table — linked to the trade by foreign key, with model name and timestamp.</div>
         <span class="tag sql">Postgres</span>
       </div>
     </div>
@@ -303,11 +417,348 @@
       </div>
       <div class="card">
         <div class="card-label teal-text">User views trade + AI critique</div>
-        <div class="card-sub">Mobile app fetches the closed trade — result and full AI breakdown available.</div>
+        <div class="card-sub">Mobile fetches the closed trade on demand. Full result, PnL breakdown, and AI analysis available. No polling — user taps to load.</div>
       </div>
     </div>
 
   </div>
+
+
+  <!-- ═══════════════════════════════════════════
+       V2 — Post-MVP
+  ═══════════════════════════════════════════ -->
+  <div class="flow" id="flow-2">
+
+    <div class="section-divider">— opening a trade</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">◎</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label green-text">User opens a paper trade <span class="new-badge">new</span></div>
+        <div class="card-sub">Stripe subscription checked before creation. Free tier: max 5 concurrent open trades. Pro tier: unlimited. Gate enforced in shared middleware — cannot be accidentally omitted per-handler. Rejected requests return a paywall prompt in the mobile app.</div>
+        <span class="tag stripe">Stripe gate</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Save open trade to database</div>
+        <div class="card-sub">Trade persisted with status <code style="opacity:0.7">OPEN</code>. Loaded into in-memory <code style="opacity:0.7">sync.Map</code> for matching engine.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot teal">⬡</div>
+        <div class="line" style="color:#00dcc8"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label teal-text">SSE stream delivers live price to active session <span class="new-badge">new</span></div>
+        <div class="card-sub">While the trade detail screen is open, the mobile app receives real-time price ticks via SSE. Price watcher fans out to a broadcast channel; one goroutine per connected client reads from it. Heartbeat every 30 s prevents proxy timeouts. Client disconnects are cleaned up immediately.</div>
+        <span class="tag sse">SSE</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">⬡</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card">
+        <div class="card-label green-text">Price watcher monitors the feed</div>
+        <div class="card-sub">CCXT WebSocket goroutine per exchange. Open trades in <code style="opacity:0.7">sync.Map</code>. No DB reads in hot path.</div>
+        <span class="tag ws">CCXT WS</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot teal">⬡</div>
+        <div class="line" style="color:#00dcc8"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label teal-text">User adjusts SL / TP mid-trade <span class="new-badge">new</span></div>
+        <div class="card-sub">PATCH endpoint validates new levels against entry price (SL below entry for longs, above for shorts; inverse for shorts). On success: DB updated, in-memory map updated immediately — matching engine uses the new values on the next tick without a restart.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="section-divider">— trade closes</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot yellow">⚡</div>
+        <div class="line" style="color:#ffc800"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label yellow-text">Trigger: SL/TP auto-close — or — user closes manually <span class="new-badge">new</span></div>
+        <div class="card-sub">Two paths, identical downstream logic. Auto-close: engine detects price target. Manual close: user taps "Close Trade" → <code style="opacity:0.7">PUT /trades/:id/close</code> at the current live price from the SSE stream. Both routes call the same service function.</div>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label blue-text">Update trade to CLOSED <span class="new-badge">new</span></div>
+        <div class="card-sub">Exit price, PnL, PnL%, <code style="opacity:0.7">closed_at</code> written. <code style="opacity:0.7">close_reason</code> stored: <code style="opacity:0.7">sl</code> | <code style="opacity:0.7">tp</code> | <code style="opacity:0.7">manual</code>. Trade evicted from in-memory map.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="fork-label">three things happen in parallel</div>
+    <div class="fork">
+      <div class="fork-card" style="border-color:rgba(0,255,170,0.2)">
+        <div class="card-label green-text">Notify user</div>
+        <div class="card-sub">Immediate push — trade closed, result delivered.</div>
+        <span class="tag push">Push</span>
+      </div>
+      <div class="fork-card" style="border-color:rgba(180,100,255,0.2)">
+        <div class="card-label purple-text">Queue AI analysis</div>
+        <div class="card-sub">Asynq job. Deduplicated by trade ID. Survives restarts.</div>
+        <span class="tag redis">Asynq / Redis</span>
+      </div>
+      <div class="fork-card" style="border-color:rgba(0,220,200,0.2)">
+        <div class="card-label teal-text">SSE closed event <span class="new-badge">new</span></div>
+        <div class="card-sub">Price stream for this trade terminated. Mobile card transitions to closed state without polling.</div>
+        <span class="tag sse">SSE</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot purple">⬡</div>
+        <div class="line" style="color:#b464ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label purple-text">Background worker calls Claude API</div>
+        <div class="card-sub">Trade data + last 10 closed trades for context. Exponential backoff retries. Max 1 call per trade enforced by Asynq deduplication key.</div>
+        <span class="tag ai">Claude API</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Save AI critique to database</div>
+        <div class="card-sub">Stored in <code style="opacity:0.7">ai_critiques</code> with model name, timestamp, and trade foreign key.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">◎</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label green-text">Second push: "Your analysis is ready" <span class="new-badge">new</span></div>
+        <div class="card-sub">Sent after Claude responds. Deep-links directly to the AI critique tab on the trade detail screen.</div>
+        <span class="tag push">Push</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot teal">◎</div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label teal-text">User views trade + critique + candlestick chart <span class="new-badge">new</span></div>
+        <div class="card-sub">Closed trade and AI critique fetched from Go API. Candlestick chart loaded directly from the Binance public WebSocket on-device — the connection is between the mobile app and Binance, not through the Go server. Zero server load per chart viewer.</div>
+        <span class="tag ws">Direct WS</span>
+      </div>
+    </div>
+
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════
+       V3 — Vision
+  ═══════════════════════════════════════════ -->
+  <div class="flow" id="flow-3">
+
+    <div class="section-divider">— before opening a trade</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot orange">⬡</div>
+        <div class="line" style="color:#ff8c00"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label orange-text">Backtesting overlay <span class="new-badge">new</span></div>
+        <div class="card-sub">Before submitting, user taps "Test this setup." Historical OHLCV fetched from CCXT for the selected symbol. Engine replays price action against the proposed SL/TP levels over a configurable window (7, 30, 90 days). Returns: win rate, avg PnL, max drawdown, and how many times the SL vs TP would have been hit first. No trade is created — preview only.</div>
+        <span class="tag ws">CCXT Historical</span>
+      </div>
+    </div>
+
+    <div class="section-divider">— opening a trade</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">◎</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label green-text">User opens a paper trade <span class="new-badge">new</span></div>
+        <div class="card-sub">Exchange selection expanded beyond Binance: Coinbase, Kraken, Bybit. Optional custom alert conditions attached to the trade: RSI crossing a threshold, MA crossover, or volume spike — any of which can trigger closure in addition to SL/TP. Available from mobile and desktop (Tauri app). Stripe gate still enforced.</div>
+        <span class="tag ws">Multi-exchange</span>
+        <span class="tag stripe">Stripe gate</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Save open trade to database</div>
+        <div class="card-sub">Trade stored with exchange, symbol, SL, TP, side, quantity, and an optional <code style="opacity:0.7">alert_conditions</code> JSONB column. Loaded into exchange-specific in-memory map.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot green">⬡</div>
+        <div class="line" style="color:#00ffaa"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label green-text">Multi-exchange price watchers + alert engine <span class="new-badge">new</span></div>
+        <div class="card-sub">One CCXT WebSocket goroutine per exchange, multiplexed — a single shared connection per exchange regardless of how many trades are open on it. A separate alert engine goroutine runs on each tick: evaluates RSI, moving average crossovers, and volume conditions against the stored <code style="opacity:0.7">alert_conditions</code> for each open trade.</div>
+        <span class="tag ws">CCXT WS</span>
+      </div>
+    </div>
+
+    <div class="section-divider">— trade closes</div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot yellow">⚡</div>
+        <div class="line" style="color:#ffc800"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label yellow-text">Trigger: SL/TP · manual · custom alert <span class="new-badge">new</span></div>
+        <div class="card-sub">Three close paths, same downstream logic. <code style="opacity:0.7">close_reason</code> extended: <code style="opacity:0.7">sl</code> | <code style="opacity:0.7">tp</code> | <code style="opacity:0.7">manual</code> | <code style="opacity:0.7">alert:rsi</code> | <code style="opacity:0.7">alert:ma_cross</code> | <code style="opacity:0.7">alert:volume</code>. Close reason is included in the AI prompt so the critique can reference why the trade ended.</div>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Update trade to CLOSED</div>
+        <div class="card-sub">Exit price, PnL, PnL%, close_reason, closed_at written. Evicted from in-memory map.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="fork-label">four things happen in parallel</div>
+    <div class="fork">
+      <div class="fork-card" style="border-color:rgba(0,255,170,0.2)">
+        <div class="card-label green-text">Push + SSE</div>
+        <div class="card-sub">Immediate notification. SSE closed event to active session.</div>
+        <span class="tag push">Push</span>
+        <span class="tag sse">SSE</span>
+      </div>
+      <div class="fork-card" style="border-color:rgba(180,100,255,0.2)">
+        <div class="card-label purple-text">Per-trade AI job</div>
+        <div class="card-sub">Asynq job. Deduplicated. Enhanced prompt context (see below).</div>
+        <span class="tag redis">Asynq</span>
+      </div>
+      <div class="fork-card" style="border-color:rgba(255,80,120,0.2)">
+        <div class="card-label rose-text">Social event <span class="new-badge">new</span></div>
+        <div class="card-sub">If profile is public, closed trade posted to the social feed. Followers notified.</div>
+        <span class="tag social">Social</span>
+      </div>
+      <div class="fork-card" style="border-color:rgba(255,140,0,0.2)">
+        <div class="card-label orange-text">Pattern trigger <span class="new-badge">new</span></div>
+        <div class="card-sub">Checks if weekly aggregate AI job threshold is met (N trades this week). Enqueues if so.</div>
+        <span class="tag redis">Asynq cron</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot purple">⬡</div>
+        <div class="line" style="color:#b464ff"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label purple-text">Per-trade AI critique — with vector-matched context <span class="new-badge">new</span></div>
+        <div class="card-sub">Claude receives the closed trade plus the 10 most <em style="opacity:0.8">similar</em> past trades found via vector similarity search — matched on symbol, SL/TP ratio, trade duration, and close reason. Critique explicitly compares against those precedents: "You made this same entry on BTC/USDT 3 times; here is what was different when it worked."</div>
+        <span class="tag ai">Claude API</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot purple">⬡</div>
+        <div class="line" style="color:#b464ff"></div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label purple-text">Aggregate pattern detection — weekly cron <span class="new-badge">new</span></div>
+        <div class="card-sub">Separate Asynq job processes all of the user's closed trades from the past 7 days. Prompt: "Identify recurring mistakes, strengths, and behavioural patterns." Output stored in <code style="opacity:0.7">ai_patterns</code> table with category tags (risk management, exit timing, overtrading, etc.). Visible in the Analysis tab as a rolling weekly digest.</div>
+        <span class="tag ai">Claude API</span>
+        <span class="tag sql">ai_patterns</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot blue">▦</div>
+        <div class="line" style="color:#0096ff"></div>
+      </div>
+      <div class="card">
+        <div class="card-label blue-text">Save critique + patterns to database</div>
+        <div class="card-sub">Per-trade critique in <code style="opacity:0.7">ai_critiques</code>. Aggregate patterns in <code style="opacity:0.7">ai_patterns</code> with category tags and the week they cover.</div>
+        <span class="tag sql">Postgres</span>
+      </div>
+    </div>
+
+    <div class="node">
+      <div class="spine">
+        <div class="dot teal">◎</div>
+      </div>
+      <div class="card is-new">
+        <div class="card-label teal-text">User views portfolio dashboard · critique · patterns · social <span class="new-badge">new</span></div>
+        <div class="card-sub">Portfolio screen: equity curve, drawdown chart, win rate heatmap by symbol and time of day, average holding time, best/worst trade. Analysis tab: per-trade critique + weekly pattern digest. Social tab: follow other traders, view their public closed positions and aggregate stats. Export: generate PDF performance report or download CSV of all trades. Available on mobile and desktop.</div>
+        <span class="tag export">PDF / CSV</span>
+        <span class="tag social">Social</span>
+      </div>
+    </div>
+
+  </div>
+
 </div>
+
+<script>
+  const tabs = document.querySelectorAll('.vtab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const v = tab.dataset.v;
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      document.querySelectorAll('.flow').forEach(f => f.classList.remove('active'));
+      document.querySelectorAll('.vdesc').forEach(d => d.classList.remove('active'));
+      document.getElementById('flow-' + v).classList.add('active');
+      document.getElementById('vdesc-' + v).classList.add('active');
+    });
+  });
+</script>
 </body>
 </html>

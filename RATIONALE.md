@@ -21,6 +21,79 @@ Add entries here when a choice has real trade-offs worth remembering.
 
 ## Decisions
 
+### Session Caching — No Cache at MVP; JWT Custom Claim as the Long-Term Answer
+
+**Chosen:** Hit Postgres directly for user resolution at MVP. Embed internal `user_id` as a Clerk JWT custom claim to eliminate the DB lookup permanently.
+**Rejected:** Redis session cache, in-memory sync.Map cache, Redis token blacklist.
+
+**Background — three separate problems bundled under "session cache":**
+
+---
+
+**Problem 1: JWKS Key Caching**
+
+Not a concern. `lestrrat-go/jwx/v2` fetches Clerk's public keys and caches them in-memory automatically. No Clerk network call on every request. Nothing to build.
+
+---
+
+**Problem 2: User Record Resolution**
+
+Every authenticated request must resolve `clerk_id` (from the JWT) to our internal `user_id` UUID (used for ownership checks on every trade route). That resolution must come from somewhere.
+
+*Option A — Postgres on every request:*
+- The `users` table has a UNIQUE index on `clerk_id` — this is an O(log n) indexed lookup, ~1–3ms on a local connection, ~2–5ms on Fly.io's internal network.
+- Zero complexity. Always consistent. Single source of truth.
+- Correct for MVP.
+
+*Option B — In-memory cache (sync.Map):*
+- Sub-microsecond reads after warmup. No extra network hop.
+- Fatal flaw: single-instance only. Fly.io runs `count 2` for zero-downtime deploys. A `user.deleted` webhook invalidates the cache on one instance; the other keeps serving the deleted user until TTL expires.
+- Worth adding only if Postgres user lookups appear in profiling. Not at MVP.
+
+*Option C — Redis cache:*
+- Shared across all instances. Consistent invalidation via webhook. TTL provides natural expiry even if the webhook handler fails.
+- Adds a Redis round-trip (~0.5–2ms on Upstash) to every auth check — swapping one network call for another. Redis is no physically closer to the Go server than Postgres. The gain only materialises under heavy Postgres load from other queries.
+- Must fall through to Postgres on Redis miss or Redis failure — adds a second failure mode with no reliability gain at MVP scale.
+- Correct when running 3+ instances and auth latency is measurable. Wrong for MVP.
+
+*Option D — JWT custom claim (chosen long-term approach):*
+- Configure Clerk's JWT template to embed the internal UUID as a custom claim (e.g. `internal_id`).
+- Set the claim in the `user.created` webhook: after upserting the user row, call Clerk's backend API to write `publicMetadata.internal_id = <uuid>`. Clerk then includes it in every token it issues.
+- The auth middleware reads the UUID directly from the verified token. No DB. No Redis. No invalidation logic. Zero runtime dependencies beyond the JWKS crypto verification already happening.
+- Maximum stale window = token lifetime (60 minutes). Acceptable for a paper trading app.
+- This is architecturally the cleanest option and the right permanent answer. It removes an entire class of infrastructure before it needs to be built.
+
+**Why this order matters:** Implementing the JWT custom claim in Stage 2 costs one extra Clerk API call in the webhook handler. Not implementing it means patching with a cache layer later — more code, more infra, more failure modes — to solve a problem that never needed to exist.
+
+---
+
+**Problem 3: Token Revocation / Blacklisting**
+
+The traditional solution is a Redis blacklist: on logout, write `blacklisted:{jti}` with TTL = token expiry; middleware checks Redis on every request.
+
+For this app:
+- Clerk tokens expire in 60 minutes by default. Maximum exposure on a stolen token is 60 minutes.
+- The app is paper trading — no real funds, no irreversible real-world actions within 60 minutes.
+- Clerk's dashboard supports manual session revocation for emergencies.
+- A Redis blacklist adds ~0.5–2ms latency and makes Redis a hard dependency for all auth.
+
+Not needed for this app. If scope changes to handle real funds or sensitive PII, revisit.
+
+---
+
+**Decision summary:**
+
+| Problem | Decision | Trigger to revisit |
+|---|---|---|
+| JWKS caching | Done — library handles it | Never |
+| User record resolution | Postgres at MVP; JWT custom claim in Stage 2 to eliminate it | — |
+| Multi-instance cache | Skip — Redis when warranted | `fly scale count 3+` and auth latency measured |
+| Token revocation | Skip | App handles real funds or sensitive PII |
+
+**Revisit if:** App scope expands beyond paper trading into real financial transactions, or token lifetime needs to be shorter than 60 minutes for security reasons.
+
+---
+
 ### Authentication — Clerk over manual OAuth + JWT
 
 **Chosen:** Clerk
@@ -37,16 +110,89 @@ Add entries here when a choice has real trade-offs worth remembering.
 ### Backend Framework — Gin over Fiber (revised)
 
 **Chosen:** Gin
-**Rejected:** Fiber (fasthttp), Echo, stdlib net/http
-**Why:**
-- Fiber's fasthttp engine is not `net/http`-compatible; most Go middleware (OAuth, OTel, Prometheus, Clerk webhook validation) assumes standard types and will break or require an adaptor that eliminates Fiber's performance advantage
-- The SSE scaling argument (thousands of concurrent connections) does not apply at MVP scale — Gin/net/http handles SSE fine until a real bottleneck is measured
-- Gin is idiomatic, well-documented, and has a larger ecosystem; engineers expect it
-- Clerk JWT verification, Prometheus metrics, and OpenTelemetry tracing are all plug-and-play with net/http-based frameworks
+**Rejected:** Fiber (fasthttp), Echo, Chi, Gorilla Mux, stdlib `net/http`
 
-**If SSE volume ever justifies Fasthttp:** run a dedicated Fiber micro-service for the streaming endpoint only, keeping the core API on Gin. This isolates the optimisation instead of forcing the whole system onto a non-standard HTTP stack.
+---
 
-**Revisit if:** profiling shows Gin is a genuine bottleneck on the SSE fan-out path at real traffic levels
+**Candidate breakdown**
+
+**stdlib `net/http`**
+
+| Pros | Cons |
+|---|---|
+| Zero external dependencies | No path-parameter routing out of the box — `ServeMux` matches prefixes, not `{id}` patterns (pre-Go 1.22 this was painful; 1.22 added basic pattern matching but still no named params) |
+| Ships with every Go installation, never abandoned | No middleware chain — you assemble `http.Handler` wrappers by hand |
+| Everything the ecosystem builds on — 100% interoperable | No request body binding or validation; `json.Decode` + manual error handling per handler |
+| Ideal for tiny internal tools or single-endpoint proxies | Verbose: route registration, group prefixes, and common headers are boilerplate |
+
+*Verdict:* Correct for a two-endpoint proxy or internal tool. Insufficient as the routing/middleware backbone of a multi-domain API with auth, SSE, webhooks, and rate limiting.
+
+---
+
+**Chi**
+
+| Pros | Cons |
+|---|---|
+| Wraps stdlib `http.Handler` directly — any `net/http` middleware works with zero adapters | No built-in request binding or validation; you call `json.Decode` yourself |
+| Extremely lightweight (~1 000 LOC) — what you see is what you get | More boilerplate per route compared to Gin for JSON responses |
+| Idiomatic Go: no custom context type, no magic | Smaller community and middleware ecosystem than Gin |
+| Composable sub-routers that feel natural | Less documentation; fewer StackOverflow answers |
+
+*Verdict:* A legitimate choice if you want the thinnest possible layer over stdlib and are comfortable writing your own JSON helpers. Chi is what Gin is built on conceptually but with fewer batteries. For a project that already needs Clerk webhook validation, SSE helpers, and Prometheus middleware, Gin's included utilities save real time.
+
+---
+
+**Echo**
+
+| Pros | Cons |
+|---|---|
+| Performance comparable to Gin (radix-tree router, same order of magnitude) | Smaller community than Gin — fewer third-party middleware packages |
+| `net/http`-compatible; standard middleware works | Custom `echo.Context` wrapper creates same interop friction as `gin.Context` |
+| Cleaner API in some opinions (built-in Binder interface is more extensible) | OpenAPI/Swagger tooling (echo-swagger) lags Gin Swagger in ecosystem maturity |
+| Built-in HTTP/2 support | Less production battle-testing than Gin at scale |
+
+*Verdict:* Echo is a credible alternative and a reasonable swap if a future contributor strongly prefers it. It does not solve any problem that Gin creates for this project. Switching would provide no measurable benefit while requiring migration of all handler signatures.
+
+---
+
+**Gorilla Mux**
+
+| Pros | Cons |
+|---|---|
+| Flexible and expressive routing (regex patterns, host matching, query params) | Was archived in 2022 then un-archived — signals uncertain long-term maintenance |
+| `net/http`-compatible | Significantly slower than Gin, Chi, or Echo (no radix tree) |
+| Mature, widely documented | No middleware chain built in — `gorilla/handlers` is a separate package |
+| | Community has largely migrated to Chi or Gin |
+
+*Verdict:* Ruled out on maintenance uncertainty alone. No performance or feature advantage over Gin or Chi.
+
+---
+
+**Fiber (fasthttp)**
+
+| Pros | Cons |
+|---|---|
+| Highest raw throughput of any Go web framework — fasthttp avoids allocations that `net/http` makes on every request | **Not `net/http`-compatible.** This is the disqualifying issue: Clerk webhook validation, OTel tracing, Prometheus middleware, svix signature verification, and most Go middleware assume `http.Request`/`http.ResponseWriter`. Fiber requires a custom adaptor that eliminates its performance advantage and adds an untested translation layer. |
+| Express-like API — approachable for developers coming from Node.js | `fiber.Ctx` is not `*http.Request`. Every third-party library that touches the context needs evaluation or a fork. |
+| Zero-allocation routing | The performance gap only matters at tens of thousands of req/s — the SSE fan-out on this project is measured in hundreds of concurrent clients, not tens of thousands |
+| | Smaller community than Gin for Go-native developers |
+
+*Verdict:* Correct choice for a dedicated, isolated high-throughput service (e.g. a single SSE streaming endpoint with no middleware dependencies). Wrong choice for an API that integrates with Clerk, Prometheus, OTel, and svix — you would spend more time writing adaptors than the allocation savings are worth.
+
+**If SSE volume ever justifies fasthttp:** run a dedicated Fiber micro-service for the streaming endpoint only, keeping the core API on Gin. This isolates the optimisation without forcing the whole system onto a non-standard HTTP stack.
+
+---
+
+**Why Gin wins for this project**
+
+1. **Radix-tree router** — same asymptotic performance as Chi, Echo, and Fiber for the route count this project has; no meaningful difference in practice
+2. **`net/http`-compatible** — Clerk JWKS validation, svix webhook signature checking, OTel tracing, and Prometheus all plug in without adaptors
+3. **Batteries included** — `ShouldBindJSON`, `Param`, `Query`, middleware groups, and abort-with-status are 80% of what a JSON API handler needs; no boilerplate wrappers to write
+4. **Ecosystem and documentation** — largest community of the three real candidates (Gin, Chi, Echo); more middleware packages, more answered questions, more production case studies
+5. **`gin.Context` trade-off is acceptable** — the custom context is the one friction point (stdlib middleware must be wrapped with `WrapH` or `WrapF`), but every dependency this project uses either ships a native Gin middleware or has `net/http` compatibility that wraps cleanly
+6. **Team familiarity** — Gin is the first result engineers reach for in Go web development; no onboarding cost
+
+**Revisit if:** profiling shows Gin is a genuine bottleneck on the SSE fan-out path at real traffic levels, or a dependency is added that is incompatible with `gin.Context` and cannot be wrapped cleanly.
 
 ---
 
@@ -60,6 +206,61 @@ Add entries here when a choice has real trade-offs worth remembering.
 - SSE reconnects automatically; no client-side reconnect logic needed
 - WebSockets remain the right choice *inside* the Go server (CCXT exchange connections) where battery is not a concern
 **Revisit if:** we need client-initiated real-time messages (e.g., live order book interaction)
+
+---
+
+### SSE Implementation — Gin `c.Stream()` over `r3labs/sse/v2`
+
+**Chosen:** Gin's built-in `c.Stream()` + `c.SSEvent()` with a per-client buffered channel
+**Rejected:** `r3labs/sse/v2`, raw `net/http` with `http.Flusher`
+**Why:**
+- Gin already provides `c.Stream()` and `c.SSEvent()` — zero additional dependencies
+- The fan-out hub (price watcher → connected clients) must be written regardless of library; `r3labs/sse/v2` does not eliminate that work, it wraps it in an opaque layer
+- `r3labs/sse/v2` is better suited to a generic event bus pattern; here the data flow is fixed (CCXT engine → channel → SSE client), so its extra features (named streams, `Last-Event-ID` replay) add complexity without benefit at MVP scale
+- Raw `http.Flusher` is what Gin's `c.Stream()` wraps internally — no reason to drop down further
+
+**Pattern:**
+```go
+// Each connecting client receives a buffered channel.
+// The price watcher hub registers/deregisters channels.
+func (h *Handler) StreamPrices(c *gin.Context) {
+    ch := make(chan PriceUpdate, 8)
+    h.hub.Register(symbol, ch)
+    defer h.hub.Deregister(ch)
+
+    c.Stream(func(w io.Writer) bool {
+        update, ok := <-ch
+        if !ok { return false }
+        c.SSEvent("price", update)
+        return true
+    })
+}
+```
+
+**No extra Go package required.** `c.Stream` and `c.SSEvent` ship with `gin-gonic/gin`.
+
+---
+
+**Why SSE fan-out is cheap even at thousands of concurrent users**
+
+The data flow is: one upstream CCXT WebSocket per symbol → one in-process hub → N client SSE connections.
+
+The key insight is that the hub does **no per-user computation**. Every connected client watching BTC/USDT receives the exact same bytes — the serialised `PriceUpdate` struct is marshalled once and the result is written to N channels. The goroutine-per-client model means each client's write is independent I/O; a slow or disconnected client blocks only its own goroutine (buffered channel drop), not the hub.
+
+This is almost entirely **network I/O**, not CPU:
+
+| Work | Per symbol | Per connected client |
+|---|---|---|
+| Parse CCXT WebSocket message | Once | — |
+| Marshal `PriceUpdate` to JSON | Once | — |
+| Copy marshalled bytes to channel | — | One channel write |
+| Flush bytes over TCP | — | One `io.Writer.Write` |
+
+A single Fly.io `shared-cpu-1x` machine (256 MB RAM) can sustain thousands of concurrent SSE connections on this pattern without breaking a sweat. The binding constraint at scale is **open file descriptors** (one per client TCP connection) and **RAM** (~a few KB of goroutine stack + channel buffer per client), not CPU or bandwidth — the payload is tiny (a price tick is < 100 bytes).
+
+Practical ceiling before needing to think about it: roughly 10 000 concurrent clients per 256 MB instance. At that point the right move is `fly scale count 2`, not a rewrite.
+
+**Revisit if:** SSE fan-out becomes a measured bottleneck — at that point extract a dedicated Fiber micro-service for the streaming endpoint only (as noted in the Gin vs Fiber decision above).
 
 ---
 
@@ -88,42 +289,44 @@ If 100 trades close simultaneously, 100 goroutines fire Claude API calls at once
 
 ---
 
-### Mobile Styling — NativeWind over Tamagui or StyleSheet
-
-**Chosen:** NativeWind (Tailwind CSS syntax)
-**Rejected:** Tamagui, React Native Paper, raw StyleSheet
-**Why:**
-- Tailwind class names are already known; no new component API to learn
-- NativeWind v4 compiles to StyleSheet at build time — no runtime overhead
-- Tamagui is powerful but adds significant complexity and a custom compiler
-**Revisit if:** NativeWind v4 has stability issues with the Expo SDK version we're using
 
 ---
 
 ### Repository Structure — Monorepo over Polyrepo
 
-**Chosen:** Single monorepo (`pnpm` workspaces + Go modules), repo named `cryptopapertrade-api`
-**Rejected:** Separate repositories per app (`cryptopapertrade-api`, `cryptopapertrade-mobile`, etc.)
-**Why:**
+**Chosen:** Single repo, simple folder structure, each app with its own native tooling, root Makefile
+**Rejected:** Separate repositories per app
 
-**Organisation and discoverability for a small team**
-For a solo developer or small team, a single clone gives the full picture. You never wonder "which repo has the types?" or "where does the CI live?" — everything is in one place. This is the dominant reason at this scale, and it is sufficient on its own.
+**Why monorepo for a solo developer:**
 
-**Shared TypeScript contract without publishing**
-`packages/types` holds the TypeScript interfaces that describe the API response shapes. In a monorepo both mobile and (future) desktop consume this via pnpm workspace linking — no npm publish step, no version pinning, no stale types. In a polyrepo this would require either publishing to npm on every API change or duplicating the types in each consumer.
+**Friction compounds on a solo developer**
+Polyrepo requires constantly switching repos, opening separate PRs for changes that span both sides (an API shape change always has a matching mobile client change), and keeping contracts in sync manually with no tooling to catch drift. At team scale this is manageable with dedicated ownership. For a solo developer it is pure overhead with no payoff.
 
-**Note on code sharing:** Go and TypeScript do not share code — the Go module and pnpm workspaces are independent systems that coexist in the same folder without integrating. The benefit is organisational, not code-reuse. Types must be kept in sync manually or via an OpenAPI code-gen step, not automatically.
+**Go and TypeScript are just folders — they do not interfere**
+The two toolchains are completely independent and coexist without conflict. `apps/server/go.mod` is a Go module. `apps/mobile/package.json` is a Node project. Neither knows the other exists. There is no shared runtime, no shared module system, and no shared build step. They happen to live in the same git repository, which is the only thing "monorepo" means here.
+
+**The critical rule: no JS tooling managing Go**
+The only way a mixed-language monorepo becomes painful is if you force a JS monorepo tool (Turborepo, Nx, pnpm workspaces) to orchestrate the Go side. Don't. The root `Makefile` is the only cross-language coordinator — it calls `go` commands for the server and `pnpm` commands for mobile. Each app's own tooling handles everything else.
+
+**CI/CD pipelines stay independent via `paths:` filters**
+The two apps have completely different build and deploy steps:
+
+| Step | Backend (Go) | Mobile (React Native / Expo) |
+|---|---|---|
+| Build | `go build` → Docker image | `eas build` → `.ipa` / `.apk` on Expo's cloud |
+| Test | `go test ./...` | Jest + Maestro |
+| Deploy | `flyctl deploy` → Fly.io | `eas submit` → App Store + Play Store |
+| Secrets | Fly.io token, DB URL, Clerk, Claude | Expo token, Apple, Google Play, Clerk publishable key |
+
+GitHub Actions `paths:` filters keep these pipelines independent. A change in `apps/mobile/**` never triggers the Go pipeline and vice versa. Both pipelines live in `.github/workflows/` in the same repo — one place to find them, one set of repo secrets to manage.
 
 **Atomic commits across the stack**
-An API shape change and its corresponding mobile/desktop client update ship in one PR, one review, one merge. This is a convenience benefit, not a safety guarantee — it still requires discipline to update both sides.
+An API shape change and its corresponding mobile client update ship in one PR, one review, one merge. With polyrepo this requires two PRs, two reviews, manual coordination, and the risk of the mobile side lagging behind permanently.
 
-**Path-based CI preserves independent deployment**
-`.github/workflows/` uses `paths:` filters so changes in `apps/server/**` trigger only the backend deploy and changes in `apps/mobile/**` trigger only the EAS build. Each app deploys independently despite living in the same repo.
+**Splitting out later is trivial**
+Git history is preserved per-directory. When and if the team grows to the point where backend and mobile need independent ownership, `git filter-repo` extracts `apps/server/` into its own repo in minutes with full history intact. Start simple, optimise later.
 
-**Desktop addition is trivial**
-`apps/desktop/` is a placeholder from day one. Adding a Tauri or Electron app later requires no new repository, no new secrets, no new CI pipeline — just populate the directory.
-
-**Revisit if:** The team grows to the point where backend and mobile are owned by separate teams who need independent PR workflows, access controls, or release cadences. At that point, extract into separate repos linked by a published OpenAPI contract.
+**Revisit if:** The team grows to the point where backend and mobile are owned by separate teams who need independent access controls or release pipelines that `paths:` filters cannot satisfy.
 
 ---
 
@@ -134,7 +337,7 @@ An API shape change and its corresponding mobile/desktop client update ship in o
 
 **Why GitHub Actions:**
 - Already in GitHub — no third-party account, no webhook setup, secrets live in the same place as the code
-- `paths:` filters mean backend and mobile pipelines are fully independent despite the monorepo; a CSS change in mobile never triggers a Go build
+- `paths:` filters keep backend and mobile pipelines fully independent — a mobile CSS change never triggers a Go build
 - Free tier is sufficient at this scale
 - YAML workflows are committed alongside the code — the pipeline is versioned and reviewable in PRs
 
@@ -162,35 +365,52 @@ An API shape change and its corresponding mobile/desktop client update ship in o
 
 ---
 
-### Folder Structure — `apps/` + `packages/` + `internal/`
+### Folder Structure — `apps/` + `internal/`
 
-**Chosen:** `apps/{server,mobile,desktop}` at the top level; Go code under `apps/server/internal/`; shared TS types in `packages/types/`
-**Rejected:** Flat structure, `src/` root, domain-first top-level (`auth/`, `trades/`)
+**Chosen:** `apps/{server,mobile}` at the top level; Go code under `apps/server/internal/`; root `Makefile` and `docker-compose.yml`
+**Rejected:** Flat structure, `src/` root, domain-first top-level (`auth/`, `trades/`), MVC layout
+
+**Top-level layout:**
+```
+cryptopapertrade-api/
+├── apps/
+│   ├── server/              # Go backend (Gin)
+│   │   ├── cmd/api/main.go
+│   │   ├── internal/
+│   │   │   ├── auth/
+│   │   │   ├── trades/
+│   │   │   ├── engine/
+│   │   │   ├── worker/
+│   │   │   ├── database/
+│   │   │   └── models/
+│   │   ├── migrations/
+│   │   ├── Dockerfile
+│   │   └── go.mod
+│   └── mobile/              # React Native (Expo)
+│       ├── app/
+│       ├── components/
+│       └── package.json
+├── .github/workflows/
+├── docker-compose.yml       # local Postgres + Redis
+├── Makefile                 # cross-app dev commands
+└── .env.example
+```
 
 **Why `apps/` at the root:**
-- Makes it immediately obvious this is a multi-app monorepo — no guessing whether `server/` is a subdirectory of something else
-- Each app is independently runnable and deployable; the folder boundary reinforces that
+- Makes it immediately obvious this is a multi-app repo — no guessing whether `server/` is a subdirectory of something else
+- Each app is independently runnable and deployable; the folder boundary makes that clear
 
 **Why Go `internal/` with package-per-domain:**
-```
-apps/server/internal/
-├── auth/        # Clerk middleware, webhook handler
-├── trades/      # handlers + repository (no raw SQL in handlers)
-├── engine/      # price matching, PnL calculation
-├── worker/      # Asynq tasks
-├── database/    # connection pool, migrations runner
-└── models/      # shared Go structs
-```
 - `internal/` is a Go language feature — packages inside it cannot be imported by code outside `apps/server/`. Enforces encapsulation at the compiler level.
 - One package per domain keeps each concern testable in isolation; `engine/pnl.go` is pure functions with no DB dependency
 - `repository.go` per domain keeps all SQL in one place — handlers never write raw queries
 
 **Rejected alternatives:**
 - **Flat `server/` with all files at top level** — becomes unnavigable past ~10 files
-- **Domain folders at repo root** (`/auth`, `/trades`) — ambiguous whether these are frontend, backend, or shared
+- **Domain folders at repo root** (`/auth`, `/trades`) — ambiguous whether frontend, backend, or shared
 - **MVC layout** (`controllers/`, `models/`, `views/`) — doesn't map cleanly to Go idioms; creates cross-cutting dependencies
 
-**Revisit if:** A domain grows large enough to warrant its own microservice — at that point extract the `internal/<domain>` package into a separate repo.
+**Revisit if:** A domain grows large enough to warrant its own microservice — extract the `internal/<domain>` package into a separate repo.
 
 ---
 
@@ -369,17 +589,15 @@ These are not optional — each one maps to a concrete implementation rule.
 
 ### Desktop App Framework — Decision Deferred
 
-**Chosen:** Placeholder `apps/desktop/` directory in Stage 0; framework decided when desktop scope is defined
+**Chosen:** Decision deferred until mobile v1 ships
 **Candidates:** Tauri (Rust + WebView), Electron (Node.js + Chromium), Flutter Desktop
 **Why deferred:**
 - Mobile is the primary v1 client; desktop is a future enhancement
-- The right choice depends on how much UI code should be shared with mobile:
-  - **Tauri** is the current default candidate: Rust core + WebView means the UI is React/HTML, NativeWind Tailwind classes are reusable, bundle is ~5–10 MB vs Electron's ~150 MB, strong security model via explicit capability grants
-  - **Electron** is the safe fallback: mature ecosystem, most hiring familiarity, heavier but battle-tested
+- When the time comes, desktop lives in its own repo — same as mobile
+- The right framework depends on scope at that point:
+  - **Tauri** is the default candidate: Rust core + WebView, React UI, small bundle (~5–10 MB vs Electron's ~150 MB), strong capability-grant security model
+  - **Electron** is the safe fallback: mature ecosystem, battle-tested, heavier
   - **Flutter Desktop** only fits if the mobile app is rebuilt in Flutter — not the current plan
-- The monorepo structure accommodates any choice: `apps/desktop/` is an independent workspace package regardless of framework
-
-**Default when desktop scope is defined:** Tauri + shared React components from `packages/types`.
 
 **Revisit when:** Mobile v1 ships and desktop feature scope is defined.
 
